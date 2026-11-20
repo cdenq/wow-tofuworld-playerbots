@@ -11,6 +11,7 @@
 #include "RandomPlayerbotMgr.h"
 #include "SharedDefines.h"
 #include "SpellMgr.h"
+#include "TofuAutonomousAlt.h"
 
 bool AutoMaintenanceOnLevelupAction::Execute(Event /*event*/)
 {
@@ -24,21 +25,30 @@ bool AutoMaintenanceOnLevelupAction::Execute(Event /*event*/)
 
 void AutoMaintenanceOnLevelupAction::AutoTeleportForLevel()
 {
-    if (!sPlayerbotAIConfig.AutoTeleportForLevel || !sRandomPlayerbotMgr.IsRandomBot(bot))
+    // Tofu: autonomous alts also move to a zone for their new level (never to a city, which would move the hearth).
+    bool const autonomousAlt =
+        TofuAutonomousAlt::IsActive(bot) && TofuAutonomousAlt::GetSettings().teleportForLevel;
+
+    if (!sPlayerbotAIConfig.AutoTeleportForLevel || (!sRandomPlayerbotMgr.IsRandomBot(bot) && !autonomousAlt))
         return;
 
     if (botAI->HasGameClientMaster())
         return;
 
-    sRandomPlayerbotMgr.RandomTeleportForLevel(bot);
+    if (autonomousAlt)
+        sRandomPlayerbotMgr.TofuTeleportForLevel(bot);
+    else
+        sRandomPlayerbotMgr.RandomTeleportForLevel(bot);
     return;
 }
 
 void AutoMaintenanceOnLevelupAction::AutoPickTalents()
 {
     bool const isRandomBot = sRandomPlayerbotMgr.IsRandomBot(bot);
+    // Tofu: autonomous alts spend new points in their current tree (reset stays false for them below).
+    bool const autonomousAlt = TofuAutonomousAlt::IsActive(bot) && TofuAutonomousAlt::GetSettings().autoTalents;
     if (!(isRandomBot ? sPlayerbotAIConfig.AutoPickTalents
-                      : sPlayerbotAIConfig.AutoPickTalentsForPlayerControlledBots))
+                      : (autonomousAlt || sPlayerbotAIConfig.AutoPickTalentsForPlayerControlledBots)))
         return;
 
     if (bot->GetFreeTalentPoints() <= 0)
@@ -70,10 +80,16 @@ void AutoMaintenanceOnLevelupAction::AutoLearnSpell()
 void AutoMaintenanceOnLevelupAction::LearnSpells(std::ostringstream* out)
 {
     BroadcastHelper::BroadcastLevelup(botAI, bot);
+    // Tofu: autonomous alts pay for class-trainer spells only (no free professions, riding, weapon skills, or pet).
+    bool const autonomousAlt =
+        TofuAutonomousAlt::IsActive(bot) && TofuAutonomousAlt::GetSettings().learnTrainerSpells;
+
     if (sPlayerbotAIConfig.AutoLearnTrainerSpells && sRandomPlayerbotMgr.IsRandomBot(bot))
         LearnTrainerSpells(out);
+    else if (autonomousAlt)
+        TofuAutonomousAlt::LearnClassTrainerSpells(bot);
 
-    if (sPlayerbotAIConfig.AutoLearnQuestSpells && sRandomPlayerbotMgr.IsRandomBot(bot))
+    if (sPlayerbotAIConfig.AutoLearnQuestSpells && (sRandomPlayerbotMgr.IsRandomBot(bot) || autonomousAlt))
         LearnQuestSpells(out);
 }
 

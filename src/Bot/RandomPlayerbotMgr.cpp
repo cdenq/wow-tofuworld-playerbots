@@ -5,6 +5,7 @@
  */
 
 #include "RandomPlayerbotMgr.h"
+#include "TofuAutonomousAlt.h"
 #include "PlayerbotsDatabase.h"
 #include "AiFactory.h"
 #include "Battleground.h"
@@ -1992,7 +1993,12 @@ void RandomPlayerbotMgr::InitArenaTeams()
              RandomPlayerbotFactory::GetBotArenaTeamCount(ARENA_TYPE_5v5), sPlayerbotAIConfig.RandomBotArenaTeam5v5Count);
 }
 
-void RandomPlayerbotMgr::RandomTeleportForLevel(Player* bot)
+void RandomPlayerbotMgr::RandomTeleportForLevel(Player* bot) { RandomTeleportForLevelImpl(bot, false); }
+
+// Tofu: autonomous alts never take the city branch, which also moves the hearthstone (SetHomebind).
+void RandomPlayerbotMgr::TofuTeleportForLevel(Player* bot) { RandomTeleportForLevelImpl(bot, true); }
+
+void RandomPlayerbotMgr::RandomTeleportForLevelImpl(Player* bot, bool skipCities)
 {
     if (bot->InBattleground())
         return;
@@ -2025,7 +2031,7 @@ void RandomPlayerbotMgr::RandomTeleportForLevel(Player* bot)
             return;
         }
     }
-    else if (bot->GetLevel() >= 10
+    else if (!skipCities && bot->GetLevel() >= 10
              && roll < (sPlayerbotAIConfig.ProbTeleToQuestGivers + sPlayerbotAIConfig.ProbTeleToBankers) * 100)
     {
         std::vector<WorldLocation> locs = sTravelMgr.GetCityLocations(bot);
@@ -2914,6 +2920,9 @@ void RandomPlayerbotMgr::OnPlayerLogout(Player* player)
 
 void RandomPlayerbotMgr::OnBotLoginInternal(Player* const bot)
 {
+    // Tofu: autonomous alts are player characters; keep them out of random-bot guilds, arena teams, and fixed level.
+    bool const isAutonomousAlt = TofuAutonomousAlt::IsEnabled(bot->GetGUID().GetCounter());
+
     if (_isBotLogging)
     {
         LOG_INFO("playerbots", "{}/{} Bot {} logged in", playerBots.size(),
@@ -2926,6 +2935,9 @@ void RandomPlayerbotMgr::OnBotLoginInternal(Player* const bot)
     }
 
     // Run guild recovery/assignment at login to handle empty guild tables after restart.
+    if (isAutonomousAlt)
+        return;
+
     if (sPlayerbotAIConfig.RandomBotGuildCount > 0)
     {
         PlayerbotFactory factory(bot, bot->GetLevel());
@@ -3030,7 +3042,10 @@ void RandomPlayerbotMgr::OnPlayerLogin(Player* player)
         // simplicity. line marked for removal.
         player->SetPvP(sWorld->IsPvPRealm());
     }
-    else
+    // Tofu: an autonomous alt logging in as a bot (headless session; its PlayerbotAI is not attached yet) is not a
+    // real player. The same character logged in from a game client still counts.
+    else if (!(TofuAutonomousAlt::IsEnabled(player->GetGUID().GetCounter()) && player->GetSession() &&
+               player->GetSession()->IsHeadless()))
     {
         players.push_back(player);
         LOG_DEBUG("playerbots", "Including non-random bot player {} into random bot update", player->GetName().c_str());

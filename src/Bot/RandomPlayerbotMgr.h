@@ -164,6 +164,7 @@ public:
     uint32 GetTradeDiscount(Player* bot, Player* master);
     void Refresh(Player* bot);
     void RandomTeleportForLevel(Player* bot);
+    void TofuTeleportForLevel(Player* bot);
     void RandomTeleportGrindForLevel(Player* bot);
     void RandomTeleportForRpg(Player* bot);
     uint32 GetMaxAllowedBotCount();
@@ -279,6 +280,7 @@ private:
     bool ProcessBot(uint32 bot);
     void ScheduleRandomize(uint32 bot, uint32 time);
     void RandomTeleport(Player* bot);
+    void RandomTeleportForLevelImpl(Player* bot, bool skipCities);
     void RandomTeleport(Player* bot, std::vector<WorldLocation>& locs, bool hearth = false);
     uint32 GetZoneLevel(uint16 mapId, float teleX, float teleY, float teleZ);
     void UpdatePlayerZones();

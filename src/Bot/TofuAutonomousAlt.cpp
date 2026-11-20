@@ -1,0 +1,528 @@
+/*
+ * Tofu Worldview: support for mod-autonomous-altbots (Tofu fork). See TofuAutonomousAlt.h.
+ *
+ * Released under the GNU GPL v2 license, like the rest of mod-playerbots.
+ */
+
+#include "TofuAutonomousAlt.h"
+
+#include "BudgetValues.h"
+#include "CharacterCache.h"
+#include "Creature.h"
+#include "CreatureData.h"
+#include "DBCStores.h"
+#include "Item.h"
+#include "Log.h"
+#include "NewRpgInfo.h"
+#include "ObjectMgr.h"
+#include "Player.h"
+#include "PlayerbotAI.h"
+#include "PlayerbotAIConfig.h"
+#include "PlayerbotFactory.h"
+#include "Playerbots.h"
+#include "RandomPlayerbotMgr.h"
+#include "Timer.h"
+#include "Trainer.h"
+#include "TravelMgr.h"
+
+#include <algorithm>
+#include <mutex>
+#include <shared_mutex>
+#include <string>
+#include <unordered_map>
+#include <unordered_set>
+
+namespace TofuAutonomousAlt
+{
+namespace
+{
+// Registry and settings. Read from map update threads, written from the world thread.
+std::shared_mutex g_RegistryMutex;
+std::unordered_set<ObjectGuid::LowType> g_Enabled;
+Settings g_Settings;
+
+// Restock trip state per character.
+enum class TripPhase : uint8
+{
+    None,        // no trip; may start one after the cooldown
+    Travel,      // walking to a vendor spawn point (rpg status GO_CAMP)
+    AtVendor     // vendor targeted (rpg status WANDER_NPC); the rpg code sells, buys, and repairs on arrival
+};
+
+struct TripState
+{
+    TripPhase phase = TripPhase::None;
+    uint32 since = 0;          // getMSTime() when the phase or cooldown started
+    uint32 cooldown = 0;       // milliseconds to wait in phase None before checking again
+    uint32 vendorEntry = 0;
+    uint32 mapId = 0;
+    float x = 0.0f;
+    float y = 0.0f;
+    float z = 0.0f;
+};
+
+std::mutex g_TripMutex;
+std::unordered_map<ObjectGuid::LowType, TripState> g_Trips;
+
+constexpr uint32 TRIP_TRAVEL_TIMEOUT_MS = 20 * MINUTE * IN_MILLISECONDS;
+constexpr uint32 TRIP_AT_VENDOR_TIMEOUT_MS = 3 * MINUTE * IN_MILLISECONDS;
+constexpr uint32 COOLDOWN_NOT_NEEDED_MS = 1 * MINUTE * IN_MILLISECONDS;
+constexpr uint32 COOLDOWN_AFTER_TRIP_MS = 5 * MINUTE * IN_MILLISECONDS;
+constexpr uint32 COOLDOWN_NO_VENDOR_MS = 5 * MINUTE * IN_MILLISECONDS;
+constexpr uint32 COOLDOWN_FAILED_MS = 10 * MINUTE * IN_MILLISECONDS;
+constexpr float VENDOR_ARRIVE_DISTANCE = 25.0f;
+constexpr float VENDOR_FIND_RANGE = 60.0f;
+
+// Vendor spawns on non-instanced maps that sell unlimited, gold-priced arrows or bullets.
+struct AmmoVendorSpawn
+{
+    uint32 entry;
+    float x;
+    float y;
+    float z;
+    std::vector<uint32> ammoItems;
+};
+
+std::once_flag g_VendorCacheOnce;
+std::unordered_map<uint32, std::vector<AmmoVendorSpawn>> g_AmmoVendorsByMap;
+
+void BuildAmmoVendorCache()
+{
+    std::unordered_map<uint32, std::vector<uint32>> ammoByEntry;  // creature entry -> ammo item ids (empty = none)
+    uint32 spawnCount = 0;
+
+    for (auto const& [spawnId, data] : sObjectMgr->GetAllCreatureData())
+    {
+        MapEntry const* mapEntry = sMapStore.LookupEntry(data.mapid);
+        if (!mapEntry || mapEntry->Instanceable())
+            continue;
+
+        auto known = ammoByEntry.find(data.id);
+        if (known == ammoByEntry.end())
+        {
+            std::vector<uint32> items;
+            CreatureTemplate const* creatureTemplate = sObjectMgr->GetCreatureTemplate(data.id);
+            if (creatureTemplate && (creatureTemplate->npcflag & UNIT_NPC_FLAG_VENDOR))
+            {
+                if (VendorItemData const* vendorItems = sObjectMgr->GetNpcVendorItemList(data.id))
+                {
+                    for (VendorItem const* vendorItem : vendorItems->m_items)
+                    {
+                        if (!vendorItem || vendorItem->maxcount != 0 || vendorItem->ExtendedCost != 0)
+                            continue;
+
+                        ItemTemplate const* proto = sObjectMgr->GetItemTemplate(vendorItem->item);
+                        if (proto && proto->Class == ITEM_CLASS_PROJECTILE &&
+                            (proto->SubClass == ITEM_SUBCLASS_ARROW || proto->SubClass == ITEM_SUBCLASS_BULLET))
+                            items.push_back(vendorItem->item);
+                    }
+                }
+            }
+            known = ammoByEntry.emplace(data.id, std::move(items)).first;
+        }
+
+        if (known->second.empty())
+            continue;
+
+        g_AmmoVendorsByMap[data.mapid].push_back({data.id, data.posX, data.posY, data.posZ, known->second});
+        ++spawnCount;
+    }
+
+    LOG_INFO("playerbots", "TofuAutonomousAlt: cached {} ammo vendor spawns on {} maps", spawnCount,
+             g_AmmoVendorsByMap.size());
+}
+
+// Ammo subclass the equipped ranged weapon fires, or 0 when it needs none.
+uint32 RequiredAmmoSubClass(Player* bot)
+{
+    Item* ranged = bot->GetItemByPos(INVENTORY_SLOT_BAG_0, EQUIPMENT_SLOT_RANGED);
+    if (!ranged)
+        return 0;
+
+    ItemTemplate const* proto = ranged->GetTemplate();
+    if (!proto || proto->Class != ITEM_CLASS_WEAPON)
+        return 0;
+
+    switch (proto->SubClass)
+    {
+        case ITEM_SUBCLASS_WEAPON_BOW:
+        case ITEM_SUBCLASS_WEAPON_CROSSBOW:
+            return ITEM_SUBCLASS_ARROW;
+        case ITEM_SUBCLASS_WEAPON_GUN:
+            return ITEM_SUBCLASS_BULLET;
+        default:
+            return 0;
+    }
+}
+
+uint32 CurrentAmmoCount(Player* bot)
+{
+    uint32 ammoId = bot->GetUInt32Value(PLAYER_AMMO_ID);
+    return ammoId ? bot->GetItemCount(ammoId, false) : 0;
+}
+
+bool NeedsAmmo(Player* bot, uint32& ammoSubClass)
+{
+    if (bot->getClass() != CLASS_HUNTER)
+        return false;
+
+    ammoSubClass = RequiredAmmoSubClass(bot);
+    if (!ammoSubClass)
+        return false;
+
+    return CurrentAmmoCount(bot) < g_Settings.ammoThreshold;
+}
+
+uint32 FreeMoneyForAmmo(PlayerbotAI* botAI)
+{
+    return botAI->GetAiObjectContext()
+        ->GetValue<uint32>("free money for", std::to_string(static_cast<uint32>(NeedMoneyFor::ammo)))
+        ->Get();
+}
+
+// Nearest friendly vendor on the bot's map that sells ammo the bot can use and afford. Returns nullptr if none.
+AmmoVendorSpawn const* FindAmmoVendor(Player* bot, uint32 ammoSubClass, uint32 budget, float maxDistance)
+{
+    std::call_once(g_VendorCacheOnce, BuildAmmoVendorCache);
+
+    auto mapItr = g_AmmoVendorsByMap.find(bot->GetMapId());
+    if (mapItr == g_AmmoVendorsByMap.end())
+        return nullptr;
+
+    FactionTemplateEntry const* botFaction = bot->GetFactionTemplateEntry();
+    if (!botFaction)
+        return nullptr;
+
+    AmmoVendorSpawn const* best = nullptr;
+    float bestDistance = maxDistance;
+
+    for (AmmoVendorSpawn const& spawn : mapItr->second)
+    {
+        float distance = bot->GetExactDist(spawn.x, spawn.y, spawn.z);
+        if (distance >= bestDistance)
+            continue;
+
+        CreatureTemplate const* creatureTemplate = sObjectMgr->GetCreatureTemplate(spawn.entry);
+        if (!creatureTemplate)
+            continue;
+
+        FactionTemplateEntry const* vendorFaction = sFactionTemplateStore.LookupEntry(creatureTemplate->faction);
+        if (!vendorFaction || vendorFaction->IsHostileTo(*botFaction))
+            continue;
+
+        bool affordable = false;
+        for (uint32 itemId : spawn.ammoItems)
+        {
+            ItemTemplate const* proto = sObjectMgr->GetItemTemplate(itemId);
+            if (!proto || proto->SubClass != ammoSubClass || proto->RequiredLevel > bot->GetLevel())
+                continue;
+
+            if (proto->BuyPrice >= 0 && static_cast<uint32>(proto->BuyPrice) <= budget)
+            {
+                affordable = true;
+                break;
+            }
+        }
+
+        if (!affordable)
+            continue;
+
+        best = &spawn;
+        bestDistance = distance;
+    }
+
+    return best;
+}
+
+void StartCooldown(TripState& state, uint32 now, uint32 cooldown)
+{
+    state.phase = TripPhase::None;
+    state.since = now;
+    state.cooldown = cooldown;
+}
+}  // namespace
+
+void SetEnabled(ObjectGuid::LowType guid, bool enabled)
+{
+    {
+        std::unique_lock lock(g_RegistryMutex);
+        if (enabled)
+            g_Enabled.insert(guid);
+        else
+            g_Enabled.erase(guid);
+    }
+
+    if (!enabled)
+        ClearBotState(guid);
+}
+
+void ReplaceAll(std::vector<ObjectGuid::LowType> const& guids)
+{
+    std::unique_lock lock(g_RegistryMutex);
+    g_Enabled.clear();
+    g_Enabled.insert(guids.begin(), guids.end());
+}
+
+bool IsEnabled(ObjectGuid::LowType guid)
+{
+    std::shared_lock lock(g_RegistryMutex);
+    return g_Enabled.contains(guid);
+}
+
+void SetSettings(Settings const& settings)
+{
+    std::unique_lock lock(g_RegistryMutex);
+    g_Settings = settings;
+}
+
+Settings GetSettings()
+{
+    std::shared_lock lock(g_RegistryMutex);
+    return g_Settings;
+}
+
+bool IsActive(Player* player)
+{
+    if (!player || !IsEnabled(player->GetGUID().GetCounter()))
+        return false;
+
+    // A PlayerbotAI means a bot of some kind; a selfbot is a real client in AFK mode, not an autonomous alt.
+    return GET_PLAYERBOT_AI(player) != nullptr && !IsSelfBot(player);
+}
+
+bool CanControl(Player* bot, Player* from)
+{
+    if (!bot || !from || !from->GetSession() || !IsRealPlayer(from))
+        return false;
+
+    if (from->GetSession()->GetSecurity() >= SEC_GAMEMASTER)
+        return true;
+
+    uint32 botAccount = sCharacterCache->GetCharacterAccountIdByGuid(bot->GetGUID());
+    uint32 fromAccount = from->GetSession()->GetAccountId();
+
+    if (botAccount && botAccount == fromAccount)
+        return true;
+
+    if (sPlayerbotAIConfig.AllowGuildBots && bot->GetGuildId() && bot->GetGuildId() == from->GetGuildId())
+        return true;
+
+    if (sPlayerbotAIConfig.AllowTrustedAccountBots && botAccount &&
+        sRandomPlayerbotMgr.IsAccountLinked(botAccount, fromAccount))
+        return true;
+
+    return false;
+}
+
+uint32 LearnClassTrainerSpells(Player* bot)
+{
+    if (!bot)
+        return 0;
+
+    // Class trainers that would teach this character (class and race checks are in IsTrainerValidForPlayer).
+    std::vector<Trainer::Trainer const*> trainers;
+    for (auto const& [entry, creatureTemplate] : *sObjectMgr->GetCreatureTemplates())
+    {
+        Trainer::Trainer const* trainer = sObjectMgr->GetTrainer(entry);
+        if (!trainer || trainer->GetTrainerType() != Trainer::Type::Class)
+            continue;
+
+        if (!trainer->IsTrainerValidForPlayer(bot))
+            continue;
+
+        trainers.push_back(trainer);
+    }
+
+    uint32 learned = 0;
+
+    // Several passes, because learning rank N can make rank N+1 teachable in the same level-up.
+    for (uint32 pass = 0; pass < 5; ++pass)
+    {
+        std::vector<std::pair<Trainer::Trainer const*, Trainer::Spell const*>> candidates;
+        std::unordered_set<uint32> seen;
+
+        for (Trainer::Trainer const* trainer : trainers)
+        {
+            for (Trainer::Spell const& spell : trainer->GetSpells())
+            {
+                if (seen.contains(spell.SpellId))
+                    continue;
+
+                if (!PlayerbotFactory::IsTrainerSpellAllowedForBot(bot, trainer, &spell))
+                    continue;
+
+                if (!trainer->CanTeachSpell(bot, &spell))
+                    continue;
+
+                seen.insert(spell.SpellId);
+                candidates.emplace_back(trainer, &spell);
+            }
+        }
+
+        if (candidates.empty())
+            break;
+
+        std::sort(candidates.begin(), candidates.end(),
+                  [](auto const& a, auto const& b)
+                  {
+                      if (a.second->ReqLevel != b.second->ReqLevel)
+                          return a.second->ReqLevel < b.second->ReqLevel;
+                      return a.second->MoneyCost < b.second->MoneyCost;
+                  });
+
+        uint32 learnedThisPass = 0;
+        for (auto const& [trainer, spell] : candidates)
+        {
+            // Re-check: an earlier spell in this pass may have changed what is teachable.
+            if (!trainer->CanTeachSpell(bot, spell))
+                continue;
+
+            if (bot->GetMoney() < spell->MoneyCost)
+                continue;  // waits for a later level-up when the character has the gold
+
+            bot->ModifyMoney(-static_cast<int32>(spell->MoneyCost));
+
+            // Same as Trainer::TeachSpell: castable entries are "learn" spells that teach through a cast.
+            if (spell->IsCastable())
+                bot->CastSpell(bot, spell->SpellId, true);
+            else
+                bot->learnSpell(spell->SpellId, false);
+
+            ++learned;
+            ++learnedThisPass;
+        }
+
+        if (!learnedThisPass)
+            break;
+    }
+
+    if (learned)
+        LOG_DEBUG("playerbots", "TofuAutonomousAlt: {} learned {} class trainer spell(s)", bot->GetName(), learned);
+
+    return learned;
+}
+
+bool UpdateRestock(PlayerbotAI* botAI)
+{
+    if (!botAI)
+        return false;
+
+    Player* bot = botAI->GetBot();
+    if (!bot || !IsActive(bot))
+        return false;
+
+    Settings const settings = GetSettings();
+    ObjectGuid::LowType const guid = bot->GetGUID().GetCounter();
+    uint32 const now = getMSTime();
+
+    std::lock_guard lock(g_TripMutex);
+    TripState& state = g_Trips[guid];
+
+    // While a real player leads it, the player decides where it goes.
+    if (!settings.restock || botAI->HasGameClientMaster())
+    {
+        if (state.phase != TripPhase::None)
+            StartCooldown(state, now, COOLDOWN_AFTER_TRIP_MS);
+        return false;
+    }
+
+    NewRpgInfo& info = botAI->rpgInfo;
+
+    switch (state.phase)
+    {
+        case TripPhase::Travel:
+        {
+            // Something else took over (combat death, a quest, a command): end the trip.
+            if (info.GetStatus() != RPG_GO_CAMP || bot->GetMapId() != state.mapId)
+            {
+                StartCooldown(state, now, COOLDOWN_AFTER_TRIP_MS);
+                return false;
+            }
+
+            if (getMSTimeDiff(state.since, now) > TRIP_TRAVEL_TIMEOUT_MS)
+            {
+                StartCooldown(state, now, COOLDOWN_FAILED_MS);
+                info.ChangeToIdle();
+                return true;
+            }
+
+            if (bot->GetExactDist(state.x, state.y, state.z) > VENDOR_ARRIVE_DISTANCE)
+                return false;  // keep walking (NewRpgGoCampAction moves toward the spawn point)
+
+            Creature* vendor = bot->FindNearestCreature(state.vendorEntry, VENDOR_FIND_RANGE);
+            if (!vendor)
+            {
+                StartCooldown(state, now, COOLDOWN_FAILED_MS);
+                info.ChangeToIdle();
+                return true;
+            }
+
+            info.ChangeToWanderNpc();
+            if (auto* wander = std::get_if<NewRpgInfo::WanderNpc>(&info.data))
+            {
+                wander->npcOrGo = vendor->GetGUID();
+                wander->lastReach = 0;
+            }
+
+            state.phase = TripPhase::AtVendor;
+            state.since = now;
+            return true;
+        }
+        case TripPhase::AtVendor:
+        {
+            if (info.GetStatus() == RPG_WANDER_NPC && getMSTimeDiff(state.since, now) < TRIP_AT_VENDOR_TIMEOUT_MS)
+                return false;  // the wander-npc action is walking to the vendor or trading with it
+
+            StartCooldown(state, now, COOLDOWN_AFTER_TRIP_MS);
+            return false;
+        }
+        case TripPhase::None:
+        default:
+        {
+            if (getMSTimeDiff(state.since, now) < state.cooldown)
+                return false;
+
+            // Only start from idle, so quests and travel already in progress are not interrupted.
+            if (info.GetStatus() != RPG_IDLE)
+                return false;
+
+            uint32 ammoSubClass = 0;
+            if (!NeedsAmmo(bot, ammoSubClass))
+            {
+                StartCooldown(state, now, COOLDOWN_NOT_NEEDED_MS);
+                return false;
+            }
+
+            // Not enough gold: keep grinding and looting; check again later.
+            AmmoVendorSpawn const* vendor =
+                FindAmmoVendor(bot, ammoSubClass, FreeMoneyForAmmo(botAI), settings.vendorSearchDistance);
+            if (!vendor)
+            {
+                StartCooldown(state, now, COOLDOWN_NO_VENDOR_MS);
+                return false;
+            }
+
+            info.ChangeToGoCamp(WorldPosition(bot->GetMapId(), vendor->x, vendor->y, vendor->z));
+
+            state.phase = TripPhase::Travel;
+            state.since = now;
+            state.cooldown = 0;
+            state.vendorEntry = vendor->entry;
+            state.mapId = bot->GetMapId();
+            state.x = vendor->x;
+            state.y = vendor->y;
+            state.z = vendor->z;
+
+            LOG_DEBUG("playerbots", "TofuAutonomousAlt: {} is low on ammo ({}), walking to vendor {}", bot->GetName(),
+                      CurrentAmmoCount(bot), vendor->entry);
+            return true;
+        }
+    }
+}
+
+void ClearBotState(ObjectGuid::LowType guid)
+{
+    std::lock_guard lock(g_TripMutex);
+    g_Trips.erase(guid);
+}
+}  // namespace TofuAutonomousAlt

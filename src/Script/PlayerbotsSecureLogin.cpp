@@ -40,7 +40,10 @@ namespace
 
         if (Player* master = botAI->GetMaster())
         {
-            if (PlayerbotMgr* mgr = GET_PLAYERBOT_MGR(master))
+            // Tofu: only if the master's holder owns this bot. A random bot or an autonomous alt that joined a
+            // player's group has that player as master but is held by the random bot manager.
+            PlayerbotMgr* mgr = GET_PLAYERBOT_MGR(master);
+            if (mgr && mgr->GetPlayerBot(target->GetGUID()))
             {
                 mgr->LogoutPlayerBot(target->GetGUID());
                 return;

@@ -30,6 +30,7 @@
 #include "Random.h"
 #include "SharedDefines.h"
 #include "Timer.h"
+#include "TofuAutonomousAlt.h"
 #include "TravelMgr.h"
 #include "WaypointMovementGenerator.h"
 #include "G3D/Vector2.h"
@@ -248,6 +249,10 @@ bool StartRpgDoQuestAction::Execute(Event event)
 
 bool NewRpgStatusUpdateAction::Execute(Event /*event*/)
 {
+    // Tofu: autonomous alts walk to a vendor and buy ammo when they run low (see TofuAutonomousAlt.cpp).
+    if (TofuAutonomousAlt::UpdateRestock(botAI))
+        return true;
+
     NewRpgInfo& info = botAI->rpgInfo;
     NewRpgStatus status = info.GetStatus();
     switch (status)
@@ -447,13 +452,19 @@ bool NewRpgWanderNpcAction::Execute(Event /*event*/)
             {
                 constexpr uint32 MIN_VENDOR_BALANCE = 1000;  // 10 silver
 
-                if (creature->HasNpcFlag(UNIT_NPC_FLAG_VENDOR) && AI_VALUE(bool, "can sell"))
+                // Tofu: autonomous alts always shop at a vendor they reach (ammo restocking), even with nothing to
+                // sell and under the 10 silver floor; the buy action still checks what they can afford.
+                bool const autonomousAlt = TofuAutonomousAlt::IsActive(bot);
+                bool const canSell = AI_VALUE(bool, "can sell");
+
+                if (creature->HasNpcFlag(UNIT_NPC_FLAG_VENDOR) && (canSell || autonomousAlt))
                 {
-                    botAI->DoSpecificAction("sell", Event("sell", "vendor"), true);
+                    if (canSell)
+                        botAI->DoSpecificAction("sell", Event("sell", "vendor"), true);
 
                     // Buying sorts the vendor list through the weight calculator; skip it for
                     // bots without money for cheap consumables.
-                    if (bot->GetMoney() >= MIN_VENDOR_BALANCE)
+                    if (autonomousAlt || bot->GetMoney() >= MIN_VENDOR_BALANCE)
                         botAI->DoSpecificAction("buy", Event("buy", "vendor"), true);
                 }
 

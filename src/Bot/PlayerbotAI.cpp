@@ -5,6 +5,7 @@
  */
 
 #include "PlayerbotAI.h"
+#include "TofuAutonomousAlt.h"
 #include "AiFactory.h"
 #include "BudgetValues.h"
 #include "ChannelMgr.h"
@@ -4757,6 +4758,10 @@ bool PlayerbotAI::AllowActive(ActivityType activityType)
 
     // always allow packet handling (e.g. group invites, trade, loot, friend requests etc)
     if (activityType == PACKET_ACTIVITY)
+        return true;
+
+    // Tofu: enrolled autonomous alts keep their full AI running even with no real player nearby.
+    if (TofuAutonomousAlt::IsActive(bot))
         return true;
 
     // all bots forced active, no rotation or scaling needed

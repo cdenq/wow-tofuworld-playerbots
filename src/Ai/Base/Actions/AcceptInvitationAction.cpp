@@ -11,6 +11,7 @@
 #include "PlayerbotSecurity.h"
 #include "PlayerbotTextMgr.h"
 #include "Playerbots.h"
+#include "TofuAutonomousAlt.h"
 #include "WorldPacket.h"
 
 bool AcceptInvitationAction::Execute(Event /*event*/)
@@ -22,7 +23,11 @@ bool AcceptInvitationAction::Execute(Event /*event*/)
     if (!inviter)
         return false;
 
-    if (!botAI->GetSecurity()->CheckLevelFor(PLAYERBOT_SECURITY_INVITE, false, inviter))
+    // Tofu: an autonomous alt only joins a real player who may control it (owner's account, guild, link, or a GM).
+    bool const autonomousAlt = TofuAutonomousAlt::IsActive(bot);
+
+    if (!botAI->GetSecurity()->CheckLevelFor(PLAYERBOT_SECURITY_INVITE, false, inviter) ||
+        (autonomousAlt && !TofuAutonomousAlt::CanControl(bot, inviter)))
     {
         WorldPacket data(SMSG_GROUP_DECLINE, 10);
         data << bot->GetName();
@@ -42,7 +47,7 @@ bool AcceptInvitationAction::Execute(Event /*event*/)
     if (!bot->GetGroup() || !bot->GetGroup()->IsMember(inviter->GetGUID()))
         return false;
 
-    if (sRandomPlayerbotMgr.IsRandomBot(bot))
+    if (sRandomPlayerbotMgr.IsRandomBot(bot) || autonomousAlt)
         botAI->SetMaster(inviter);
     // else
     // PlayerbotRepository::instance().Save(botAI);
