@@ -317,6 +317,9 @@ bool NewRpgBaseAction::InteractWithNpcOrGameObjectForQuest(ObjectGuid guid)
     //     bot->GetSession()->HandleGossipHelloOpcode(packet);
     // }
 
+    // Tofu: a party leader brings its present party members to the same quest giver.
+    TofuAutonomousAlt::NotifyPartyQuestGiver(bot, guid);
+
     bot->PrepareQuestMenu(guid);
     QuestMenu const& menu = bot->PlayerTalkClass->GetQuestMenu();
     if (menu.Empty())
@@ -331,7 +334,7 @@ bool NewRpgBaseAction::InteractWithNpcOrGameObjectForQuest(ObjectGuid guid)
 
         QuestStatus const& status = bot->GetQuestStatus(item.QuestId);
         if (status == QUEST_STATUS_NONE && bot->CanTakeQuest(quest, false) && bot->CanAddQuest(quest, false) &&
-            NewRpgHelpers::IsQuestWorthDoing(bot, quest) && NewRpgHelpers::IsQuestCapableDoing(bot, quest))
+            NewRpgHelpers::IsQuestWorthDoing(bot, quest) && NewRpgHelpers::IsQuestCapableDoing(bot, quest, true))
         {
             AcceptQuest(quest, guid);
             if (botAI->GetMaster())
@@ -516,7 +519,7 @@ bool NewRpgBaseAction::OrganizeQuestLog()
 
         Quest const* quest = sObjectMgr->GetQuestTemplate(questId);
         bool const worthDoing = NewRpgHelpers::IsQuestWorthDoing(bot, quest);
-        bool const capableDoing = NewRpgHelpers::IsQuestCapableDoing(bot, quest);
+        bool const capableDoing = NewRpgHelpers::IsQuestCapableDoing(bot, quest, true);
         bool const failed = bot->GetQuestStatus(questId) == QUEST_STATUS_FAILED;
         if (!worthDoing || !capableDoing || failed)
         {
@@ -983,6 +986,11 @@ bool NewRpgBaseAction::RandomChangeStatus(std::vector<NewRpgStatus> candidateSta
                 if (botAI->lowPriorityQuest.find(questId) != botAI->lowPriorityQuest.end())
                     continue;
 
+                // Tofu: a party skips group quests it lacks the members for until they are back.
+                if (Quest const* logQuest = sObjectMgr->GetQuestTemplate(questId))
+                    if (TofuAutonomousAlt::PartyQuestCapable(bot, logQuest, false) == 0)
+                        continue;
+
                 std::vector<POIInfo> poiInfo;
                 if (GetQuestPOIPosAndObjectiveIdx(questId, poiInfo, true))
                 {
@@ -1079,6 +1087,11 @@ bool NewRpgBaseAction::CheckRpgStatusAvailable(NewRpgStatus status)
                 uint32 questId = bot->GetQuestSlotQuestId(slot);
                 if (botAI->lowPriorityQuest.find(questId) != botAI->lowPriorityQuest.end())
                     continue;
+
+                // Tofu: a party skips group quests it lacks the members for until they are back.
+                if (Quest const* logQuest = sObjectMgr->GetQuestTemplate(questId))
+                    if (TofuAutonomousAlt::PartyQuestCapable(bot, logQuest, false) == 0)
+                        continue;
 
                 std::vector<POIInfo> poiInfo;
                 if (GetQuestPOIPosAndObjectiveIdx(questId, poiInfo, true))

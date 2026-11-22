@@ -15,10 +15,13 @@
 #include "Log.h"
 #include "NewRpgInfo.h"
 #include "ObjectMgr.h"
+#include "Group.h"
+#include "GroupReference.h"
 #include "Player.h"
 #include "PlayerbotAI.h"
 #include "PlayerbotAIConfig.h"
 #include "PlayerbotFactory.h"
+#include "QuestDef.h"
 #include "Playerbots.h"
 #include "RandomPlayerbotMgr.h"
 #include "Timer.h"
@@ -46,6 +49,21 @@ Settings g_Settings;
 std::mutex g_FleeMutex;
 std::unordered_map<ObjectGuid::LowType, uint32> g_LastFlee;
 constexpr uint32 FLEE_ONGOING_MS = 5 * IN_MILLISECONDS;
+
+// Parties and the quest-giver relay.
+std::unordered_map<ObjectGuid::LowType, uint32> g_PartyOf;
+std::unordered_map<uint32, uint32> g_PartyRosterSize;
+
+struct PendingGiver
+{
+    ObjectGuid giver;
+    uint32 since = 0;
+};
+
+std::mutex g_RelayMutex;
+std::unordered_map<ObjectGuid::LowType, PendingGiver> g_PendingGivers;
+constexpr uint32 RELAY_TIMEOUT_MS = 60 * IN_MILLISECONDS;
+constexpr float RELAY_RANGE = 40.0f;
 
 // Restock trip state per character.
 enum class TripPhase : uint8
@@ -369,6 +387,162 @@ bool CanControl(Player* bot, Player* from)
     return false;
 }
 
+void SetPartyMember(ObjectGuid::LowType guid, uint32 partyId)
+{
+    std::unique_lock lock(g_RegistryMutex);
+    if (partyId)
+        g_PartyOf[guid] = partyId;
+    else
+        g_PartyOf.erase(guid);
+}
+
+void SetPartyRosterSize(uint32 partyId, uint32 size)
+{
+    std::unique_lock lock(g_RegistryMutex);
+    if (size)
+        g_PartyRosterSize[partyId] = size;
+    else
+        g_PartyRosterSize.erase(partyId);
+}
+
+void ClearParties()
+{
+    std::unique_lock lock(g_RegistryMutex);
+    g_PartyOf.clear();
+    g_PartyRosterSize.clear();
+}
+
+uint32 GetPartyId(ObjectGuid::LowType guid)
+{
+    std::shared_lock lock(g_RegistryMutex);
+    auto itr = g_PartyOf.find(guid);
+    return itr != g_PartyOf.end() ? itr->second : 0;
+}
+
+uint32 GetPartyRosterSize(uint32 partyId)
+{
+    std::shared_lock lock(g_RegistryMutex);
+    auto itr = g_PartyRosterSize.find(partyId);
+    return itr != g_PartyRosterSize.end() ? itr->second : 0;
+}
+
+bool IsPartyLeader(Player* bot)
+{
+    if (!bot || !GetPartyId(bot->GetGUID().GetCounter()) || !IsActive(bot))
+        return false;
+
+    Group* group = bot->GetGroup();
+    return group && group->GetLeaderGUID() == bot->GetGUID();
+}
+
+uint32 CountPresentGroupMembers(Player* bot)
+{
+    Group* group = bot ? bot->GetGroup() : nullptr;
+    if (!group)
+        return 1;
+
+    float const range = GetSettings().partyPresentRange;
+    uint32 count = 0;
+    for (GroupReference* ref = group->GetFirstMember(); ref; ref = ref->next())
+    {
+        Player* member = ref->GetSource();
+        if (!member || !member->IsInWorld() || !member->IsAlive() || member->GetMapId() != bot->GetMapId())
+            continue;
+
+        if (member != bot && !member->IsWithinDistInMap(bot, range))
+            continue;
+
+        ++count;
+    }
+
+    return std::max<uint32>(count, 1);
+}
+
+int32 PartyQuestCapable(Player* bot, Quest const* quest, bool forKeeping)
+{
+    if (!bot || !quest)
+        return -1;
+
+    uint32 const partyId = GetPartyId(bot->GetGUID().GetCounter());
+    if (!partyId || !IsActive(bot))
+        return -1;
+
+    uint32 count = CountPresentGroupMembers(bot);
+    if (forKeeping)
+        count = std::max(count, GetPartyRosterSize(partyId));
+
+    uint32 const suggested = std::max<uint32>(quest->GetSuggestedPlayers(), 1);
+    uint32 needed = 0;
+    if (quest->GetType() == 0)
+        needed = suggested;
+    else if (quest->GetType() == QUEST_TYPE_ELITE)
+        needed = std::max(suggested, GetSettings().partyEliteMinMembers);
+    else
+        return 0;  // dungeon, raid, PvP, escort, and other special quests are not open-world party content
+
+    return count >= needed ? 1 : 0;
+}
+
+int32 PartyCanFightElite(Player* bot)
+{
+    if (!bot || !GetPartyId(bot->GetGUID().GetCounter()) || !IsActive(bot))
+        return -1;
+
+    return CountPresentGroupMembers(bot) >= GetSettings().partyEliteMinMembers ? 1 : 0;
+}
+
+void NotifyPartyQuestGiver(Player* leader, ObjectGuid giver)
+{
+    if (!leader || giver.IsEmpty() || !IsPartyLeader(leader))
+        return;
+
+    uint32 const partyId = GetPartyId(leader->GetGUID().GetCounter());
+    uint32 const now = getMSTime();
+
+    std::vector<ObjectGuid::LowType> members;
+    for (GroupReference* ref = leader->GetGroup()->GetFirstMember(); ref; ref = ref->next())
+    {
+        Player* member = ref->GetSource();
+        if (!member || member == leader || !member->IsInWorld() || member->GetMapId() != leader->GetMapId())
+            continue;
+
+        if (!member->IsWithinDistInMap(leader, RELAY_RANGE))
+            continue;
+
+        if (GetPartyId(member->GetGUID().GetCounter()) != partyId || !IsActive(member))
+            continue;
+
+        members.push_back(member->GetGUID().GetCounter());
+    }
+
+    std::lock_guard lock(g_RelayMutex);
+    for (ObjectGuid::LowType guid : members)
+        g_PendingGivers[guid] = {giver, now};
+}
+
+bool GetPendingQuestGiver(ObjectGuid::LowType guid, ObjectGuid& giver)
+{
+    std::lock_guard lock(g_RelayMutex);
+    auto itr = g_PendingGivers.find(guid);
+    if (itr == g_PendingGivers.end())
+        return false;
+
+    if (getMSTimeDiff(itr->second.since, getMSTime()) > RELAY_TIMEOUT_MS)
+    {
+        g_PendingGivers.erase(itr);
+        return false;
+    }
+
+    giver = itr->second.giver;
+    return true;
+}
+
+void ClearPendingQuestGiver(ObjectGuid::LowType guid)
+{
+    std::lock_guard lock(g_RelayMutex);
+    g_PendingGivers.erase(guid);
+}
+
 uint32 LearnClassTrainerSpells(Player* bot)
 {
     if (!bot)
@@ -582,7 +756,11 @@ void ClearBotState(ObjectGuid::LowType guid)
         g_Trips.erase(guid);
     }
 
-    std::lock_guard lock(g_FleeMutex);
-    g_LastFlee.erase(guid);
+    {
+        std::lock_guard lock(g_FleeMutex);
+        g_LastFlee.erase(guid);
+    }
+
+    ClearPendingQuestGiver(guid);
 }
 }  // namespace TofuAutonomousAlt

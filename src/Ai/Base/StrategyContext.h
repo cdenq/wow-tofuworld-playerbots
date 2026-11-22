@@ -10,6 +10,7 @@
 #include "AggressiveStrategy.h"
 #include "AttackEnemyPlayersStrategy.h"
 #include "TofuHardcoreStrategy.h"
+#include "TofuPartyStrategy.h"
 #include "BattlegroundStrategy.h"
 #include "CastTimeStrategy.h"
 #include "ChatCommandHandlerStrategy.h"
@@ -87,6 +88,7 @@ public:
         creators["tell target"] = &StrategyContext::tell_target;
         creators["pvp"] = &StrategyContext::pvp;
         creators["tofu hardcore"] = &StrategyContext::tofu_hardcore;
+        creators["tofu party"] = &StrategyContext::tofu_party;
         creators["return"] = &StrategyContext::_return;
         creators["lfg"] = &StrategyContext::lfg;
         creators["custom"] = &StrategyContext::custom;
@@ -167,6 +169,7 @@ private:
     static Strategy* force_rebuff(PlayerbotAI* botAI) { return new ForceRebuffStrategy(botAI); }
     static Strategy* pvp(PlayerbotAI* botAI) { return new AttackEnemyPlayersStrategy(botAI); }
     static Strategy* tofu_hardcore(PlayerbotAI* botAI) { return new TofuHardcoreStrategy(botAI); }
+    static Strategy* tofu_party(PlayerbotAI* botAI) { return new TofuPartyStrategy(botAI); }
     static Strategy* _return(PlayerbotAI* botAI) { return new ReturnStrategy(botAI); }
     static Strategy* lfg(PlayerbotAI* botAI) { return new LfgStrategy(botAI); }
     static Strategy* custom(PlayerbotAI* botAI) { return new CustomStrategy(botAI); }

@@ -20,6 +20,7 @@
 
 class Player;
 class PlayerbotAI;
+class Quest;
 
 namespace TofuAutonomousAlt
 {
@@ -36,6 +37,10 @@ struct Settings
     float hardcoreRestHealthPct = 80.0f;   // start no new fight below this health
     float hardcoreFleeHealthPct = 30.0f;   // run from a fight below this health
     uint32 hardcoreMaxLevelsAbove = 2;     // grind targets at most this many levels above (stock: 4)
+
+    // Parties (only for alts the module puts in a party with SetPartyMember).
+    uint32 partyEliteMinMembers = 3;       // group quests and elite mobs need this many members present
+    float partyPresentRange = 100.0f;      // a member counts as present within this many yards, on the same map
 };
 
 // Registry, written by mod-autonomous-altbots.
@@ -61,6 +66,36 @@ bool IsFleeing(ObjectGuid::LowType guid);
 // True when `from` may take control of this autonomous alt: a GM, a character on the same account, a member of the
 // same guild (if Playerbots.AllowGuildBots), or a linked account (if Playerbots.AllowTrustedAccountBots).
 bool CanControl(Player* bot, Player* from);
+
+// Parties, written by mod-autonomous-altbots. A party id of 0 means none. The roster size counts every member,
+// online or not.
+void SetPartyMember(ObjectGuid::LowType guid, uint32 partyId);
+void SetPartyRosterSize(uint32 partyId, uint32 size);
+void ClearParties();
+uint32 GetPartyId(ObjectGuid::LowType guid);
+uint32 GetPartyRosterSize(uint32 partyId);
+
+// True when IsActive(bot), the bot is in a party, and it leads its group.
+bool IsPartyLeader(Player* bot);
+
+// Members of the bot's group (the bot included) that are online, alive, on the same map, and within
+// partyPresentRange of it. 1 when the bot has no group.
+uint32 CountPresentGroupMembers(Player* bot);
+
+// Quest rule for party members: -1 when the bot is not an autonomous alt in a party (use the stock rule), else 1 or 0.
+// A normal quest needs its suggested group size present; a group (elite) quest needs at least partyEliteMinMembers.
+// With forKeeping, the party roster counts too, so a party that is one member short keeps its quests.
+int32 PartyQuestCapable(Player* bot, Quest const* quest, bool forKeeping);
+
+// Elite rule for party members: -1 when not an autonomous alt in a party, else 1 when at least partyEliteMinMembers
+// are present.
+int32 PartyCanFightElite(Player* bot);
+
+// Quest-giver relay: when a party leader talks to a quest giver, its present party members are told to walk to the
+// same giver and accept and turn in there too (a bot leader sends no client packets for followers to copy).
+void NotifyPartyQuestGiver(Player* leader, ObjectGuid giver);
+bool GetPendingQuestGiver(ObjectGuid::LowType guid, ObjectGuid& giver);
+void ClearPendingQuestGiver(ObjectGuid::LowType guid);
 
 // Learns every class-trainer spell the character can learn now and can pay for, cheapest first within each required
 // level, deducting the trainer cost. Never teaches profession recipes, riding, or weapon skills. Returns the count.

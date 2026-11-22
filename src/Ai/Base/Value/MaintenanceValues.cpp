@@ -8,6 +8,7 @@
 #include "BudgetValues.h"
 #include "ItemUsageValue.h"
 #include "Playerbots.h"
+#include "TofuAutonomousAlt.h"
 
 bool CanMoveAroundValue::Calculate()
 {
@@ -53,6 +54,11 @@ bool CanFightEqualValue::Calculate() { return AI_VALUE(uint8, "durability") > 20
 
 bool CanFightEliteValue::Calculate()
 {
+    // Tofu: autonomous alts in a party fight elites when enough members are present.
+    int32 const party = TofuAutonomousAlt::PartyCanFightElite(bot);
+    if (party >= 0)
+        return party == 1;
+
     return bot->GetGroup() && AI_VALUE2(bool, "group and", "can fight equal") &&
            AI_VALUE2(bool, "group and", "following party") && !AI_VALUE2(bool, "group or", "should sell,can sell");
 }

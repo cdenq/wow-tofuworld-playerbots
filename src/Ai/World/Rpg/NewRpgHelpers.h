@@ -27,6 +27,8 @@ bool CanInteractWithQuestGiver(Player* bot, Object* questGiver);
 bool HasQuestToAcceptOrReward(Player* bot, WorldObject* object);
 bool IsQuestWorthDoing(Player* bot, Quest const* quest);
 bool IsQuestCapableDoing(Player* bot, Quest const* quest);
+// Tofu: forKeeping judges a party alt by its full party roster (accepting, keeping), not only the members present.
+bool IsQuestCapableDoing(Player* bot, Quest const* quest, bool forKeeping);
 
 // Nearest giver in the new RPG target caches with something to accept or reward, skipping givers
 // the bot gave up on. A distanceLimit of 0 searches the whole cache.

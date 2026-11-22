@@ -15,6 +15,7 @@
 #include "PlayerbotAI.h"
 #include "Playerbots.h"
 #include "QuestDef.h"
+#include "TofuAutonomousAlt.h"
 #include "World.h"
 
 namespace NewRpgHelpers
@@ -126,7 +127,7 @@ bool HasQuestToAcceptOrReward(Player* bot, WorldObject* object)
 
         QuestStatus const& status = bot->GetQuestStatus(item.QuestId);
         if (status == QUEST_STATUS_NONE && bot->CanTakeQuest(quest, false) && bot->CanAddQuest(quest, false) &&
-            IsQuestWorthDoing(bot, quest) && IsQuestCapableDoing(bot, quest))
+            IsQuestWorthDoing(bot, quest) && IsQuestCapableDoing(bot, quest, true))
         {
             return true;
         }
@@ -151,11 +152,18 @@ bool IsQuestWorthDoing(Player* bot, Quest const* quest)
     return true;
 }
 
-bool IsQuestCapableDoing(Player* bot, Quest const* quest)
+bool IsQuestCapableDoing(Player* bot, Quest const* quest) { return IsQuestCapableDoing(bot, quest, false); }
+
+bool IsQuestCapableDoing(Player* bot, Quest const* quest, bool forKeeping)
 {
     bool highLevelQuest = bot->GetLevel() + QUEST_MAX_LEVELS_ABOVE_BOT < bot->GetQuestLevel(quest);
     if (highLevelQuest)
         return false;
+
+    // Tofu: autonomous alts in a party take group quests by the number of members present (or the roster).
+    int32 const party = TofuAutonomousAlt::PartyQuestCapable(bot, quest, forKeeping);
+    if (party >= 0)
+        return party == 1;
 
     // Elite quest and dungeon quest etc
     if (quest->GetType() != 0)
