@@ -142,7 +142,7 @@ Unit* GrindTargetValue::FindTargetForGrinding(uint32 assistCount)
                 if (!member || !member->IsAlive())
                     continue;
 
-                float d = member->GetDistance(unit);
+                float d = member->GetDistance(unit) * TofuAutonomousAlt::GrindPreferenceFactor(bot, unit);
                 if (!result || d < distance)
                 {
                     distance = d;
@@ -152,7 +152,8 @@ Unit* GrindTargetValue::FindTargetForGrinding(uint32 assistCount)
         }
         else
         {
-            float newdistance = bot->GetDistance(unit);
+            // Tofu: Self Crafted alts favour skinnable beasts or humanoids when their goal needs leather or cloth.
+            float newdistance = bot->GetDistance(unit) * TofuAutonomousAlt::GrindPreferenceFactor(bot, unit);
             if (!result || (newdistance < distance))
             {
                 distance = newdistance;

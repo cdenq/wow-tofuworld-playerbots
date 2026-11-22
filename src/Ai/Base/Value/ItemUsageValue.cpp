@@ -17,6 +17,7 @@
 #include "RandomItemMgr.h"
 #include "ServerFacade.h"
 #include "StatsWeightCalculator.h"
+#include "TofuAutonomousAlt.h"
 
 #include <unordered_set>
 
@@ -112,6 +113,15 @@ ItemUsage ItemUsageValue::Calculate()
     ItemUsage equip = QueryItemUsageForEquip(proto, randomPropertyId);
     if (equip != ITEM_USAGE_NONE)
         return equip;
+
+    // Tofu: a Self Crafted autonomous alt can never wear gear it did not craft. Enchanters disenchant it; everyone
+    // else sells it.
+    if (TofuAutonomousAlt::IsUnwearableForSelfCrafted(bot, proto))
+    {
+        if (TofuAutonomousAlt::CanDisenchantForSelfCrafted(bot, proto))
+            return ITEM_USAGE_DISENCHANT;
+        return proto->SellPrice > 0 ? ITEM_USAGE_VENDOR : ITEM_USAGE_NONE;
+    }
 
     // Get item instance to check if it's soulbound
     Item* item = bot->GetItemByEntry(proto->ItemId);
@@ -245,6 +255,11 @@ ItemUsage ItemUsageValue::QueryItemUsageForEquip(ItemTemplate const* itemProto, 
     Item* pItem = Item::CreateItem(itemProto->ItemId, 1, bot);
     if (!pItem)
         return ITEM_USAGE_NONE;
+
+    // Tofu: judge a Self Crafted alt's own crafts (and a recipe's result while it picks a craft goal) as crafted by it,
+    // so mod-challenge-modes' equip rule lets them through.
+    if (TofuAutonomousAlt::AssumeCraftedByBot(bot, itemProto->ItemId))
+        pItem->SetGuidValue(ITEM_FIELD_CREATOR, bot->GetGUID());
 
     uint16 dest;
     InventoryResult result = botAI->CanEquipItem(NULL_SLOT, dest, pItem, true, true);

@@ -88,7 +88,12 @@ void AutoMaintenanceOnLevelupAction::LearnSpells(std::ostringstream* out)
     if (sPlayerbotAIConfig.AutoLearnTrainerSpells && sRandomPlayerbotMgr.IsRandomBot(bot))
         LearnTrainerSpells(out);
     else if (autonomousAlt)
+    {
         TofuAutonomousAlt::LearnClassTrainerSpells(bot);
+        // Self Crafted alts also learn their professions, ranks, and trainer recipes, paying the trainer cost.
+        if (TofuAutonomousAlt::IsSelfCrafted(bot))
+            TofuAutonomousAlt::LearnProfessions(bot);
+    }
 
     if (sPlayerbotAIConfig.AutoLearnQuestSpells && (sRandomPlayerbotMgr.IsRandomBot(bot) || autonomousAlt))
         LearnQuestSpells(out);

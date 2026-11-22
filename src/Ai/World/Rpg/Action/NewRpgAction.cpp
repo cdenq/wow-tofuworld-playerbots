@@ -258,8 +258,17 @@ bool NewRpgStatusUpdateAction::Execute(Event /*event*/)
     switch (status)
     {
         case RPG_IDLE:
+        {
+            // Tofu: a Self Crafted alt heads for what its craft goal needs (mining for ore, grinding for leather or
+            // cloth) most of the time, when that status is available.
+            int32 const preferred = TofuAutonomousAlt::PreferredRpgStatus(botAI);
+            if (preferred >= 0 && sPlayerbotAIConfig.RpgStatusProbWeight[static_cast<NewRpgStatus>(preferred)] &&
+                CheckRpgStatusAvailable(static_cast<NewRpgStatus>(preferred)))
+                return RandomChangeStatus({static_cast<NewRpgStatus>(preferred)});
+
             return RandomChangeStatus({RPG_GO_CAMP, RPG_GO_GRIND, RPG_WANDER_RANDOM, RPG_WANDER_NPC, RPG_DO_QUEST,
                                        RPG_TRAVEL_FLIGHT, RPG_REST, RPG_OUTDOOR_PVP, RPG_DO_GATHER});
+        }
 
         case RPG_GO_GRIND:
         {

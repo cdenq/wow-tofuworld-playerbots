@@ -11,6 +11,7 @@
 #include "Opcodes.h"
 #include "Playerbots.h"
 #include "RandomPlayerbotMgr.h"
+#include "TofuAutonomousAlt.h"
 #include "World.h"
 #include "WorldPacket.h"
 
@@ -43,6 +44,11 @@ bool LfgJoinAction::Execute(Event /*event*/) { return JoinLFG(); }
 
 uint32 LfgJoinAction::GetRoles()
 {
+    // Tofu: an autonomous alt party queues with the roles mod-autonomous-altbots assigned (one tank, one healer).
+    if (TofuAutonomousAlt::IsActive(bot))
+        if (uint8 const roles = TofuAutonomousAlt::GetLfgRoles(bot->GetGUID().GetCounter()))
+            return roles;
+
     if (!RandomPlayerbotMgr::instance().IsRandomBot(bot))
     {
         if (PlayerbotAI::IsTank(bot))

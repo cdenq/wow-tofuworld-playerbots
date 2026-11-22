@@ -762,5 +762,134 @@ void ClearBotState(ObjectGuid::LowType guid)
     }
 
     ClearPendingQuestGiver(guid);
+    ClearSelfCraftedState(guid);
+    SetHubVisit(guid, false);
+    SetLfgRoles(guid, 0);
+    SetDungeonBusy(guid, false);
+}
+
+bool NeedsAmmoRestock(Player* bot)
+{
+    uint32 ammoSubClass = 0;
+    return bot && IsActive(bot) && NeedsAmmo(bot, ammoSubClass);
+}
+
+uint32 AmmoSubClassFor(Player* bot) { return bot ? RequiredAmmoSubClass(bot) : 0; }
+
+// ---- Dungeons ----
+
+namespace
+{
+std::mutex g_DungeonMutex;
+std::unordered_map<ObjectGuid::LowType, uint8> g_LfgRoles;
+std::unordered_set<ObjectGuid::LowType> g_DungeonBusy;
+std::vector<DungeonClearRequest> g_ClearRequests;
+std::unordered_map<ObjectGuid::LowType, bool> g_ClearResults;  // group low guid -> all bosses cleared
+}  // namespace
+
+void SetLfgRoles(ObjectGuid::LowType guid, uint8 roles)
+{
+    std::lock_guard lock(g_DungeonMutex);
+    if (roles)
+        g_LfgRoles[guid] = roles;
+    else
+        g_LfgRoles.erase(guid);
+}
+
+uint8 GetLfgRoles(ObjectGuid::LowType guid)
+{
+    std::lock_guard lock(g_DungeonMutex);
+    auto itr = g_LfgRoles.find(guid);
+    return itr == g_LfgRoles.end() ? 0 : itr->second;
+}
+
+void SetDungeonBusy(ObjectGuid::LowType guid, bool busy)
+{
+    std::lock_guard lock(g_DungeonMutex);
+    if (busy)
+        g_DungeonBusy.insert(guid);
+    else
+        g_DungeonBusy.erase(guid);
+}
+
+bool IsDungeonBusy(ObjectGuid::LowType guid)
+{
+    std::lock_guard lock(g_DungeonMutex);
+    return g_DungeonBusy.contains(guid);
+}
+
+bool IsTofuPartyBot(Player* player)
+{
+    return player && IsActive(player) && GetPartyId(player->GetGUID().GetCounter()) != 0;
+}
+
+void RequestDungeonClear(ObjectGuid leader, bool hardcore)
+{
+    std::lock_guard lock(g_DungeonMutex);
+    for (DungeonClearRequest& request : g_ClearRequests)
+    {
+        if (request.leader == leader)
+        {
+            request.hardcore = hardcore;
+            return;
+        }
+    }
+
+    DungeonClearRequest request;
+    request.leader = leader;
+    request.hardcore = hardcore;
+    request.since = getMSTime();
+    g_ClearRequests.push_back(request);
+}
+
+void CancelDungeonClear(ObjectGuid leader)
+{
+    std::lock_guard lock(g_DungeonMutex);
+    g_ClearRequests.erase(std::remove_if(g_ClearRequests.begin(), g_ClearRequests.end(),
+                                         [&](DungeonClearRequest const& r) { return r.leader == leader; }),
+                          g_ClearRequests.end());
+}
+
+std::vector<DungeonClearRequest> GetDungeonClearRequests()
+{
+    std::lock_guard lock(g_DungeonMutex);
+    return g_ClearRequests;
+}
+
+void MarkDungeonClearStarted(ObjectGuid leader)
+{
+    std::lock_guard lock(g_DungeonMutex);
+    for (DungeonClearRequest& request : g_ClearRequests)
+        if (request.leader == leader)
+            request.started = true;
+}
+
+void ReportDungeonClearEnded(Player* tank, bool allCleared)
+{
+    Group* group = tank ? tank->GetGroup() : nullptr;
+    if (!group)
+        return;
+
+    ObjectGuid const leader = group->GetLeaderGUID();
+    std::lock_guard lock(g_DungeonMutex);
+    bool tracked = false;
+    for (DungeonClearRequest const& request : g_ClearRequests)
+        if (request.leader == leader && request.started)
+            tracked = true;
+
+    if (tracked)
+        g_ClearResults[group->GetGUID().GetCounter()] = allCleared;
+}
+
+bool ConsumeDungeonClearResult(ObjectGuid::LowType groupLow, bool& allCleared)
+{
+    std::lock_guard lock(g_DungeonMutex);
+    auto itr = g_ClearResults.find(groupLow);
+    if (itr == g_ClearResults.end())
+        return false;
+
+    allCleared = itr->second;
+    g_ClearResults.erase(itr);
+    return true;
 }
 }  // namespace TofuAutonomousAlt

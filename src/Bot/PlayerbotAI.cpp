@@ -6885,6 +6885,10 @@ uint32 PlayerbotAI::GetReactDelay()
 {
     uint32 base = sPlayerbotAIConfig.ReactDelay;  // Default 100(ms)
 
+    // Tofu: an autonomous alt party clearing a dungeon has no human master but should think at a human-led pace.
+    if (TofuAutonomousAlt::IsActive(bot) && bot->GetMap() && bot->GetMap()->IsDungeon())
+        return base;
+
     // If dynamic react delay is disabled, use a static calculation
     if (!sPlayerbotAIConfig.DynamicReactDelay)
     {

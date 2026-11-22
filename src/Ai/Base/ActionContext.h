@@ -45,6 +45,7 @@
 #include "MoveToTravelTargetAction.h"
 #include "MovementActions.h"
 #include "TofuHardcoreStrategy.h"
+#include "TofuCraftStrategy.h"
 #include "TofuPartyStrategy.h"
 #include "NewRpgAction.h"
 #include "NewRpgDoGather.h"
@@ -100,6 +101,8 @@ public:
         creators["flee"] = &ActionContext::flee;
         creators["tofu hardcore flee"] = &ActionContext::tofu_hardcore_flee;
         creators["tofu party quest giver"] = &ActionContext::tofu_party_quest_giver;
+        creators["tofu craft"] = &ActionContext::tofu_craft;
+        creators["tofu hub errand"] = &ActionContext::tofu_hub_errand;
         creators["flee with pet"] = &ActionContext::flee_with_pet;
         creators["avoid aoe"] = &ActionContext::avoid_aoe;
         creators["wake on combat start"] = &ActionContext::wake_on_combat_start;
@@ -326,6 +329,8 @@ private:
     static Action* flee(PlayerbotAI* botAI) { return new FleeAction(botAI); }
     static Action* tofu_hardcore_flee(PlayerbotAI* botAI) { return new TofuHardcoreFleeAction(botAI); }
     static Action* tofu_party_quest_giver(PlayerbotAI* botAI) { return new TofuPartyQuestGiverAction(botAI); }
+    static Action* tofu_craft(PlayerbotAI* botAI) { return new TofuCraftAction(botAI); }
+    static Action* tofu_hub_errand(PlayerbotAI* botAI) { return new TofuHubErrandAction(botAI); }
     static Action* flee_with_pet(PlayerbotAI* botAI) { return new FleeWithPetAction(botAI); }
     static Action* avoid_aoe(PlayerbotAI* botAI) { return new AvoidAoeAction(botAI); }
     static Action* wake_on_combat_start(PlayerbotAI* botAI) { return new WakeOnCombatStartAction(botAI); }

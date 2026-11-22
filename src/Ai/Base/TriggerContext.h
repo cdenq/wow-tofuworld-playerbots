@@ -14,6 +14,7 @@
 #include "GuildTriggers.h"
 #include "HealthTriggers.h"
 #include "TofuHardcoreStrategy.h"
+#include "TofuCraftStrategy.h"
 #include "TofuPartyStrategy.h"
 #include "LfgTriggers.h"
 #include "LootTriggers.h"
@@ -56,6 +57,8 @@ public:
         creators["tofu hardcore flee"] = &TriggerContext::tofu_hardcore_flee;
         creators["tofu hardcore rest"] = &TriggerContext::tofu_hardcore_rest;
         creators["tofu party quest giver"] = &TriggerContext::tofu_party_quest_giver;
+        creators["tofu craft"] = &TriggerContext::tofu_craft;
+        creators["tofu hub errand"] = &TriggerContext::tofu_hub_errand;
         creators["low health"] = &TriggerContext::LowHealth;
         creators["medium health"] = &TriggerContext::MediumHealth;
         creators["almost full health"] = &TriggerContext::AlmostFullHealth;
@@ -328,6 +331,8 @@ private:
     static Trigger* tofu_hardcore_flee(PlayerbotAI* botAI) { return new TofuHardcoreFleeTrigger(botAI); }
     static Trigger* tofu_hardcore_rest(PlayerbotAI* botAI) { return new TofuHardcoreRestTrigger(botAI); }
     static Trigger* tofu_party_quest_giver(PlayerbotAI* botAI) { return new TofuPartyQuestGiverTrigger(botAI); }
+    static Trigger* tofu_craft(PlayerbotAI* botAI) { return new TofuCraftTrigger(botAI); }
+    static Trigger* tofu_hub_errand(PlayerbotAI* botAI) { return new TofuHubErrandTrigger(botAI); }
     static Trigger* TargetCriticalHealth(PlayerbotAI* botAI) { return new TargetCriticalHealthTrigger(botAI); }
     static Trigger* LowMana(PlayerbotAI* botAI) { return new LowManaTrigger(botAI); }
     static Trigger* MediumMana(PlayerbotAI* botAI) { return new MediumManaTrigger(botAI); }
