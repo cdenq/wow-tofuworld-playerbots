@@ -39,7 +39,13 @@ namespace
 // Registry and settings. Read from map update threads, written from the world thread.
 std::shared_mutex g_RegistryMutex;
 std::unordered_set<ObjectGuid::LowType> g_Enabled;
+std::unordered_set<ObjectGuid::LowType> g_Hardcore;
 Settings g_Settings;
+
+// Last time (getMSTime) the Hardcore flee action ran for a character. A flee counts as ongoing for a few seconds after.
+std::mutex g_FleeMutex;
+std::unordered_map<ObjectGuid::LowType, uint32> g_LastFlee;
+constexpr uint32 FLEE_ONGOING_MS = 5 * IN_MILLISECONDS;
 
 // Restock trip state per character.
 enum class TripPhase : uint8
@@ -253,13 +259,62 @@ void SetEnabled(ObjectGuid::LowType guid, bool enabled)
     }
 
     if (!enabled)
+    {
+        SetHardcore(guid, false);
         ClearBotState(guid);
+    }
+}
+
+void SetHardcore(ObjectGuid::LowType guid, bool hardcore)
+{
+    std::unique_lock lock(g_RegistryMutex);
+    if (hardcore)
+        g_Hardcore.insert(guid);
+    else
+        g_Hardcore.erase(guid);
+}
+
+bool IsHardcore(Player* player)
+{
+    if (!player)
+        return false;
+
+    {
+        std::shared_lock lock(g_RegistryMutex);
+        if (!g_Hardcore.contains(player->GetGUID().GetCounter()))
+            return false;
+    }
+
+    return IsActive(player);
+}
+
+void MarkFleeing(ObjectGuid::LowType guid)
+{
+    std::lock_guard lock(g_FleeMutex);
+    g_LastFlee[guid] = getMSTime();
+}
+
+bool IsFleeing(ObjectGuid::LowType guid)
+{
+    std::lock_guard lock(g_FleeMutex);
+    auto itr = g_LastFlee.find(guid);
+    if (itr == g_LastFlee.end())
+        return false;
+
+    if (getMSTimeDiff(itr->second, getMSTime()) > FLEE_ONGOING_MS)
+    {
+        g_LastFlee.erase(itr);
+        return false;
+    }
+
+    return true;
 }
 
 void ReplaceAll(std::vector<ObjectGuid::LowType> const& guids)
 {
     std::unique_lock lock(g_RegistryMutex);
     g_Enabled.clear();
+    g_Hardcore.clear();
     g_Enabled.insert(guids.begin(), guids.end());
 }
 
@@ -522,7 +577,12 @@ bool UpdateRestock(PlayerbotAI* botAI)
 
 void ClearBotState(ObjectGuid::LowType guid)
 {
-    std::lock_guard lock(g_TripMutex);
-    g_Trips.erase(guid);
+    {
+        std::lock_guard lock(g_TripMutex);
+        g_Trips.erase(guid);
+    }
+
+    std::lock_guard lock(g_FleeMutex);
+    g_LastFlee.erase(guid);
 }
 }  // namespace TofuAutonomousAlt

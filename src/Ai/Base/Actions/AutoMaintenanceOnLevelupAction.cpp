@@ -26,8 +26,9 @@ bool AutoMaintenanceOnLevelupAction::Execute(Event /*event*/)
 void AutoMaintenanceOnLevelupAction::AutoTeleportForLevel()
 {
     // Tofu: autonomous alts also move to a zone for their new level (never to a city, which would move the hearth).
-    bool const autonomousAlt =
-        TofuAutonomousAlt::IsActive(bot) && TofuAutonomousAlt::GetSettings().teleportForLevel;
+    // Hardcore alts never teleport: a new zone at the new level is where they would die.
+    bool const autonomousAlt = TofuAutonomousAlt::IsActive(bot) && TofuAutonomousAlt::GetSettings().teleportForLevel &&
+                               !TofuAutonomousAlt::IsHardcore(bot);
 
     if (!sPlayerbotAIConfig.AutoTeleportForLevel || (!sRandomPlayerbotMgr.IsRandomBot(bot) && !autonomousAlt))
         return;

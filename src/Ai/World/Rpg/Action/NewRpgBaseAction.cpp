@@ -39,6 +39,7 @@
 #include "Timer.h"
 #include "TravelMgr.h"
 #include "G3D/Vector2.h"
+#include "TofuAutonomousAlt.h"
 
 bool NewRpgBaseAction::MoveFarTo(WorldPosition dest)
 {
@@ -1108,7 +1109,8 @@ bool NewRpgBaseAction::CheckRpgStatusAvailable(NewRpgStatus status)
         }
         case RPG_OUTDOOR_PVP:
         {
-            if (!bot->IsPvP())
+            // Tofu: every death is permanent for a Hardcore alt, so it never goes to outdoor PvP objectives.
+            if (!bot->IsPvP() || TofuAutonomousAlt::IsHardcore(bot))
                 return false;
             uint32 zoneId = bot->GetZoneId();
             if (zoneId == AREA_NAGRAND)

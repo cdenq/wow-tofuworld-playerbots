@@ -10,9 +10,16 @@
 #include "ReputationMgr.h"
 #include "ServerFacade.h"
 #include "SharedDefines.h"
+#include "TofuAutonomousAlt.h"
 
 Unit* GrindTargetValue::Calculate()
 {
+    // Tofu: a Hardcore autonomous alt starts no new fight below the rest threshold (it rests first). Attackers are
+    // still answered, because FindTargetForGrinding returns them first and this gate only applies out of combat.
+    if (!bot->IsInCombat() && TofuAutonomousAlt::IsHardcore(bot) &&
+        bot->GetHealthPct() < TofuAutonomousAlt::GetSettings().hardcoreRestHealthPct)
+        return nullptr;
+
     uint32 memberCount = 1;
     Group* group = bot->GetGroup();
     if (group)
@@ -50,6 +57,11 @@ Unit* GrindTargetValue::FindTargetForGrinding(uint32 assistCount)
     GuidVector targets = *context->GetValue<GuidVector>("possible targets");
     if (targets.empty())
         return nullptr;
+
+    // Tofu: Hardcore autonomous alts pick targets at most hardcoreMaxLevelsAbove above them (stock: 4).
+    int32 const maxLevelsAbove = TofuAutonomousAlt::IsHardcore(bot)
+                                     ? static_cast<int32>(TofuAutonomousAlt::GetSettings().hardcoreMaxLevelsAbove)
+                                     : 4;
 
     float distance = 0;
     Unit* result = nullptr;
@@ -92,7 +104,8 @@ Unit* GrindTargetValue::FindTargetForGrinding(uint32 assistCount)
             continue;
         }
 
-        if (!bot->InBattleground() && (int)unit->GetLevel() - (int)bot->GetLevel() > 4 && !unit->GetGUID().IsPlayer())
+        if (!bot->InBattleground() && (int)unit->GetLevel() - (int)bot->GetLevel() > maxLevelsAbove &&
+            !unit->GetGUID().IsPlayer())
             continue;
 
         if (Creature* creature = unit->ToCreature())

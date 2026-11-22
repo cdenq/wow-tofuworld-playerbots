@@ -31,6 +31,11 @@ struct Settings
     bool restock = true;               // travel to a vendor and buy ammo when it runs low
     uint32 ammoThreshold = 200;        // a hunter with less ammo than this goes shopping
     float vendorSearchDistance = 3000.0f;  // only vendors on the same map within this many yards
+
+    // Hardcore survival (only for alts the module marks Hardcore with SetHardcore).
+    float hardcoreRestHealthPct = 80.0f;   // start no new fight below this health
+    float hardcoreFleeHealthPct = 30.0f;   // run from a fight below this health
+    uint32 hardcoreMaxLevelsAbove = 2;     // grind targets at most this many levels above (stock: 4)
 };
 
 // Registry, written by mod-autonomous-altbots.
@@ -42,6 +47,16 @@ Settings GetSettings();
 
 // True when this character is enrolled and is currently running as a playerbot (not driven by a game client).
 bool IsActive(Player* player);
+
+// Hardcore flag, written by mod-autonomous-altbots while the character's Hardcore challenge is active.
+void SetHardcore(ObjectGuid::LowType guid, bool hardcore);
+// True when IsActive(player) and the character is flagged Hardcore.
+bool IsHardcore(Player* player);
+
+// Flee state for Hardcore alts: once a flee starts below the flee threshold it continues until health is back at the
+// rest threshold or the fight is over. MarkFleeing is called each time the flee action runs.
+void MarkFleeing(ObjectGuid::LowType guid);
+bool IsFleeing(ObjectGuid::LowType guid);
 
 // True when `from` may take control of this autonomous alt: a GM, a character on the same account, a member of the
 // same guild (if Playerbots.AllowGuildBots), or a linked account (if Playerbots.AllowTrustedAccountBots).

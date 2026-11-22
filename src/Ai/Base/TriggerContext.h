@@ -13,6 +13,7 @@
 #include "GenericTriggers.h"
 #include "GuildTriggers.h"
 #include "HealthTriggers.h"
+#include "TofuHardcoreStrategy.h"
 #include "LfgTriggers.h"
 #include "LootTriggers.h"
 #include "NamedObjectContext.h"
@@ -51,6 +52,8 @@ public:
         creators["target critical health"] = &TriggerContext::TargetCriticalHealth;
 
         creators["critical health"] = &TriggerContext::CriticalHealth;
+        creators["tofu hardcore flee"] = &TriggerContext::tofu_hardcore_flee;
+        creators["tofu hardcore rest"] = &TriggerContext::tofu_hardcore_rest;
         creators["low health"] = &TriggerContext::LowHealth;
         creators["medium health"] = &TriggerContext::MediumHealth;
         creators["almost full health"] = &TriggerContext::AlmostFullHealth;
@@ -320,6 +323,8 @@ private:
     static Trigger* MediumHealth(PlayerbotAI* botAI) { return new MediumHealthTrigger(botAI); }
     static Trigger* AlmostFullHealth(PlayerbotAI* botAI) { return new AlmostFullHealthTrigger(botAI); }
     static Trigger* CriticalHealth(PlayerbotAI* botAI) { return new CriticalHealthTrigger(botAI); }
+    static Trigger* tofu_hardcore_flee(PlayerbotAI* botAI) { return new TofuHardcoreFleeTrigger(botAI); }
+    static Trigger* tofu_hardcore_rest(PlayerbotAI* botAI) { return new TofuHardcoreRestTrigger(botAI); }
     static Trigger* TargetCriticalHealth(PlayerbotAI* botAI) { return new TargetCriticalHealthTrigger(botAI); }
     static Trigger* LowMana(PlayerbotAI* botAI) { return new LowManaTrigger(botAI); }
     static Trigger* MediumMana(PlayerbotAI* botAI) { return new MediumManaTrigger(botAI); }
