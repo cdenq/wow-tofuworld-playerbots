@@ -5,9 +5,48 @@
  */
 
 #include "AcceptQuestAction.h"
+
+#include <mutex>
+#include <unordered_map>
+
 #include "Event.h"
+#include "ObjectAccessor.h"
 #include "PlayerbotTextMgr.h"
 #include "Playerbots.h"
+
+namespace
+{
+// Tofu: quest id -> item that starts it (item_template.startquest), built once.
+uint32 QuestStarterItem(uint32 questId)
+{
+    static std::once_flag built;
+    static std::unordered_map<uint32, uint32> starters;
+    std::call_once(built, []
+    {
+        for (auto const& [itemId, proto] : *sObjectMgr->GetItemTemplateStore())
+            if (proto.StartQuest)
+                starters.emplace(proto.StartQuest, itemId);
+    });
+
+    auto const it = starters.find(questId);
+    return it != starters.end() ? it->second : 0;
+}
+
+// Tofu: a shared quest that an item starts and that needs that item to be turned in comes with the item.
+void GiveSharedQuestStarterItem(Player* bot, Quest const* quest)
+{
+    uint32 const itemId = QuestStarterItem(quest->GetQuestId());
+    if (!itemId || bot->HasItemCount(itemId, 1, true))
+        return;
+
+    for (uint32 i = 0; i < QUEST_ITEM_OBJECTIVES_COUNT; ++i)
+        if (quest->RequiredItemId[i] == itemId)
+        {
+            bot->StoreNewItemInBestSlots(itemId, std::max<uint32>(quest->RequiredItemCount[i], 1));
+            return;
+        }
+}
+}  // namespace
 
 bool AcceptAllQuestsAction::ProcessQuest(Quest const* quest, Object* questGiver)
 {
@@ -101,17 +140,27 @@ bool AcceptQuestAction::Execute(Event event)
 
 bool AcceptQuestShareAction::Execute(Event event)
 {
-    Player* master = GetMaster();
     Player* bot = botAI->GetBot();
+    if (!bot->GetDivider())
+        return false;  // not a share (the bot opened a quest giver itself)
 
+    // Tofu: SMSG_QUESTGIVER_QUEST_DETAILS is giver guid, divider guid, quest id.
     WorldPacket& p = event.getPacket();
-    p.rpos(0);
+    p.rpos(p.GetOpcode() == SMSG_QUESTGIVER_QUEST_DETAILS ? 16 : 0);
     uint32 quest;
     p >> quest;
 
+    // The player who shared it (the master for the old master-packet path).
+    Player* master = ObjectAccessor::FindPlayer(bot->GetDivider());
+    if (!master)
+        master = GetMaster();
+
     Quest const* qInfo = sObjectMgr->GetQuestTemplate(quest);
-    if (!qInfo || !bot->GetDivider())
+    if (!qInfo || !master)
+    {
+        bot->SetDivider(ObjectGuid::Empty);
         return false;
+    }
 
     quest = qInfo->GetQuestId();
 
@@ -143,6 +192,7 @@ bool AcceptQuestShareAction::Execute(Event event)
     if (bot->CanAddQuest(qInfo, false))
     {
         bot->AddQuest(qInfo, master);
+        GiveSharedQuestStarterItem(bot, qInfo);
 
         if (bot->CanCompleteQuest(quest))
             bot->CompleteQuest(quest);
