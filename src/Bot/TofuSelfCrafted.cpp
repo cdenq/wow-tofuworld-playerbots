@@ -561,7 +561,7 @@ void ClearSelfCraftedState(ObjectGuid::LowType guid)
     g_Craft.erase(guid);
 }
 
-uint32 LearnProfessions(Player* bot, Creature* trainerNpc)
+uint32 LearnProfessions(Player* bot, Creature* trainerNpc, uint32* shortfall)
 {
     if (!bot)
         return 0;
@@ -624,7 +624,11 @@ uint32 LearnProfessions(Player* bot, Creature* trainerNpc)
                 if (bot->HasSpell(entry->learnedSpell) || !entry->trainer->CanTeachSpell(bot, entry->spell))
                     continue;
                 if (bot->GetMoney() < entry->spell->MoneyCost)
+                {
+                    if (shortfall && pass == 0 && bot->HasSkill(skill))
+                        *shortfall += entry->spell->MoneyCost;
                     continue;
+                }
 
                 // A profession the character does not know is only started when it is on its list.
                 if (!bot->HasSkill(skill) && !IsSelfCrafted(bot))

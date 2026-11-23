@@ -6,6 +6,7 @@
 
 #include "AutoMaintenanceOnLevelupAction.h"
 #include "BroadcastHelper.h"
+#include "ChatHelper.h"
 #include "PlayerbotAIConfig.h"
 #include "PlayerbotFactory.h"
 #include "RandomPlayerbotMgr.h"
@@ -93,6 +94,14 @@ void AutoMaintenanceOnLevelupAction::LearnSpells(std::ostringstream* out)
         // Self Crafted alts also learn their professions, ranks, and trainer recipes, paying the trainer cost.
         if (TofuAutonomousAlt::IsSelfCrafted(bot))
             TofuAutonomousAlt::LearnProfessions(bot);
+    }
+    else if (TofuAutonomousAlt::IsMultiboxAlt(bot) && TofuAutonomousAlt::GetSettings().multiboxTraining)
+    {
+        // Tofu multibox: a player's own altbot in his group pays for its class spells and says when it is short.
+        uint32 shortfall = 0;
+        TofuAutonomousAlt::LearnClassTrainerSpells(bot, &shortfall);
+        if (shortfall)
+            botAI->TellMaster("I need " + ChatHelper::formatMoney(shortfall) + " more to train my new spells.");
     }
 
     if (sPlayerbotAIConfig.AutoLearnQuestSpells && (sRandomPlayerbotMgr.IsRandomBot(bot) || autonomousAlt))

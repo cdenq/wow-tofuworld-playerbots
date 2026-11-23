@@ -543,7 +543,7 @@ void ClearPendingQuestGiver(ObjectGuid::LowType guid)
     g_PendingGivers.erase(guid);
 }
 
-uint32 LearnClassTrainerSpells(Player* bot)
+uint32 LearnClassTrainerSpells(Player* bot, uint32* shortfall)
 {
     if (!bot)
         return 0;
@@ -607,7 +607,11 @@ uint32 LearnClassTrainerSpells(Player* bot)
                 continue;
 
             if (bot->GetMoney() < spell->MoneyCost)
+            {
+                if (shortfall && pass == 0)
+                    *shortfall += spell->MoneyCost;
                 continue;  // waits for a later level-up when the character has the gold
+            }
 
             bot->ModifyMoney(-static_cast<int32>(spell->MoneyCost));
 
@@ -766,6 +770,19 @@ void ClearBotState(ObjectGuid::LowType guid)
     SetHubVisit(guid, false);
     SetLfgRoles(guid, 0);
     SetDungeonBusy(guid, false);
+}
+
+bool IsMultiboxAlt(Player* bot)
+{
+    if (!bot || !GetSettings().multiboxEnable)
+        return false;
+
+    PlayerbotAI* botAI = GET_PLAYERBOT_AI(bot);
+    if (!botAI || sRandomPlayerbotMgr.IsRandomBot(bot))
+        return false;
+
+    Player* master = botAI->GetMaster();
+    return master && master != bot && IsRealPlayer(master) && bot->GetGroup() && master->GetGroup() == bot->GetGroup();
 }
 
 bool NeedsAmmoRestock(Player* bot)

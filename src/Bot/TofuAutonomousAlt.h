@@ -51,6 +51,10 @@ struct Settings
     // Restock trips to the guild hub (the module decides when; these are the thresholds it asks about).
     float restockBagPct = 50.0f;           // bags this full (percent of slots) call for a trip
     float restockDurabilityPct = 25.0f;    // lowest equipped item durability below this calls for a trip
+
+    // Multibox: a real player's own altbots in his group (mod-autonomous-altbots Multibox.*).
+    bool multiboxEnable = false;
+    bool multiboxTraining = true;          // pay for class spells at level-up and whisper when short of gold
 };
 
 // The guild hub: a place with class and profession trainers, a forge and an anvil, and a vendor that buys and repairs.
@@ -137,7 +141,11 @@ void ClearPendingQuestGiver(ObjectGuid::LowType guid);
 
 // Learns every class-trainer spell the character can learn now and can pay for, cheapest first within each required
 // level, deducting the trainer cost. Never teaches profession recipes, riding, or weapon skills. Returns the count.
-uint32 LearnClassTrainerSpells(Player* bot);
+// `shortfall`, when given, receives the gold (copper) the character was missing for the spells it could not afford.
+uint32 LearnClassTrainerSpells(Player* bot, uint32* shortfall = nullptr);
+
+// Multibox: a playerbot (not a random bot) whose master is a real player in the same group, with Multibox on.
+bool IsMultiboxAlt(Player* bot);
 
 // Called at the start of NewRpgStatusUpdateAction. Starts, advances, or ends an ammo restocking trip. Returns true
 // when it changed the bot's rpg status this tick.
@@ -159,7 +167,7 @@ void ClearSelfCraftedState(ObjectGuid::LowType guid);
 // Learns, paying the trainer cost: the listed professions into free primary slots, then every rank and recipe the
 // trainers teach for the primary professions the character knows. With `trainerNpc`, only that NPC's trainer list
 // (a hub errand); without, any trainer in the world. Also buys vendor recipes it can learn when `vendorNpc` is given.
-uint32 LearnProfessions(Player* bot, Creature* trainerNpc = nullptr);
+uint32 LearnProfessions(Player* bot, Creature* trainerNpc = nullptr, uint32* shortfall = nullptr);
 uint32 BuyVendorRecipes(Player* bot, Creature* vendorNpc);
 
 // Buys missing profession tools and the vendor-sold reagents the current craft goal needs from this NPC's list.
