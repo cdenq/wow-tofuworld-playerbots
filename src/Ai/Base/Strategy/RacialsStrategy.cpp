@@ -5,7 +5,11 @@
  */
 
 #include "RacialsStrategy.h"
+
 #include "Playerbots.h"
+#include "Spell.h"
+#include "SpellInfo.h"
+#include "SpellMgr.h"
 
 namespace
 {
@@ -46,6 +50,13 @@ void RacialsStrategy::InitTriggers(std::vector<TriggerNode*>& triggers)
         // No low runic power trigger exists; this trigger should be modified if one is added
         triggers.push_back(new TriggerNode(
             "generic boost", { NextAction("arcane torrent", ACTION_NORMAL + 5) }));
+    }
+
+    // Tofu: every Arcane Torrent (stock 28730, 25046, 50613 and the custom warrior and druid versions) interrupts.
+    if (botAI->HasSpell("arcane torrent"))
+    {
+        triggers.push_back(new TriggerNode(
+            "tofu arcane torrent interrupt", { NextAction("arcane torrent", ACTION_INTERRUPT + 1) }));
     }
 
     if (bot->HasSpell(SPELL_WAR_STOMP))
@@ -105,4 +116,36 @@ void RacialsStrategy::InitTriggers(std::vector<TriggerNode*>& triggers)
 
     triggers.push_back(new TriggerNode(
         "generic boost", { NextAction("use trinket", ACTION_NORMAL + 4) }));
+}
+
+bool TofuArcaneTorrentInterruptTrigger::IsActive()
+{
+    if (!bot->IsInCombat())
+        return false;
+
+    uint32 const spellId = AI_VALUE2(uint32, "spell id", "arcane torrent");
+    SpellInfo const* torrent = spellId ? sSpellMgr->GetSpellInfo(spellId) : nullptr;
+    if (!torrent || bot->HasSpellCooldown(spellId))
+        return false;
+
+    float radius = 8.0f;  // stock Arcane Torrent silence radius
+    for (SpellEffectInfo const& effect : torrent->Effects)
+        if (effect.ApplyAuraName == SPELL_AURA_MOD_SILENCE && effect.HasRadius())
+            radius = effect.CalcRadius(bot);
+
+    for (ObjectGuid const& guid : AI_VALUE(GuidVector, "possible targets"))
+    {
+        Unit* enemy = botAI->GetUnit(guid);
+        if (!enemy || !enemy->IsAlive() || bot->GetDistance(enemy) > radius)
+            continue;
+
+        Spell* cast = enemy->GetCurrentSpell(CURRENT_GENERIC_SPELL);
+        if (!cast)
+            cast = enemy->GetCurrentSpell(CURRENT_CHANNELED_SPELL);
+        SpellInfo const* casting = cast ? cast->GetSpellInfo() : nullptr;
+        if (casting && (casting->InterruptFlags & SPELL_INTERRUPT_FLAG_INTERRUPT) &&
+            casting->PreventionType == SPELL_PREVENTION_TYPE_SILENCE)
+            return true;
+    }
+    return false;
 }

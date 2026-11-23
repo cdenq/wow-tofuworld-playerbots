@@ -14,6 +14,7 @@
 #include "GuildTriggers.h"
 #include "HealthTriggers.h"
 #include "TofuHardcoreStrategy.h"
+#include "RacialsStrategy.h"
 #include "TofuCraftStrategy.h"
 #include "TofuPartyStrategy.h"
 #include "LfgTriggers.h"
@@ -55,6 +56,7 @@ public:
 
         creators["critical health"] = &TriggerContext::CriticalHealth;
         creators["tofu hardcore flee"] = &TriggerContext::tofu_hardcore_flee;
+        creators["tofu arcane torrent interrupt"] = &TriggerContext::tofu_arcane_torrent_interrupt;
         creators["tofu hardcore rest"] = &TriggerContext::tofu_hardcore_rest;
         creators["tofu party quest giver"] = &TriggerContext::tofu_party_quest_giver;
         creators["tofu craft"] = &TriggerContext::tofu_craft;
@@ -329,6 +331,10 @@ private:
     static Trigger* AlmostFullHealth(PlayerbotAI* botAI) { return new AlmostFullHealthTrigger(botAI); }
     static Trigger* CriticalHealth(PlayerbotAI* botAI) { return new CriticalHealthTrigger(botAI); }
     static Trigger* tofu_hardcore_flee(PlayerbotAI* botAI) { return new TofuHardcoreFleeTrigger(botAI); }
+    static Trigger* tofu_arcane_torrent_interrupt(PlayerbotAI* botAI)
+    {
+        return new TofuArcaneTorrentInterruptTrigger(botAI);
+    }
     static Trigger* tofu_hardcore_rest(PlayerbotAI* botAI) { return new TofuHardcoreRestTrigger(botAI); }
     static Trigger* tofu_party_quest_giver(PlayerbotAI* botAI) { return new TofuPartyQuestGiverTrigger(botAI); }
     static Trigger* tofu_craft(PlayerbotAI* botAI) { return new TofuCraftTrigger(botAI); }
