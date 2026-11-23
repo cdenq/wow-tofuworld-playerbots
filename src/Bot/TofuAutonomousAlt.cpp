@@ -774,7 +774,12 @@ void ClearBotState(ObjectGuid::LowType guid)
 
 bool IsMultiboxAlt(Player* bot)
 {
-    if (!bot || !GetSettings().multiboxEnable)
+    return GetSettings().multiboxEnable && IsAltWithRealPlayer(bot);
+}
+
+bool IsAltWithRealPlayer(Player* bot)
+{
+    if (!bot)
         return false;
 
     PlayerbotAI* botAI = GET_PLAYERBOT_AI(bot);

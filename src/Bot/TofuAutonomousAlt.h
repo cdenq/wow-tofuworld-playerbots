@@ -147,6 +147,10 @@ uint32 LearnClassTrainerSpells(Player* bot, uint32* shortfall = nullptr);
 // Multibox: a playerbot (not a random bot) whose master is a real player in the same group, with Multibox on.
 bool IsMultiboxAlt(Player* bot);
 
+// A player's own bot (not a random bot) whose master is a real player in the same group. Such bots never drop quests
+// on their own (clean quest log, new rpg log organizing); they abandon only when the player abandons.
+bool IsAltWithRealPlayer(Player* bot);
+
 // Called at the start of NewRpgStatusUpdateAction. Starts, advances, or ends an ammo restocking trip. Returns true
 // when it changed the bot's rpg status this tick.
 bool UpdateRestock(PlayerbotAI* botAI);

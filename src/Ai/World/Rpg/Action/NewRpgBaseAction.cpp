@@ -496,6 +496,10 @@ uint32 NewRpgBaseAction::BestRewardIndex(Quest const* quest)
 
 bool NewRpgBaseAction::OrganizeQuestLog()
 {
+    // Tofu: an altbot in a real player's group keeps every quest until that player abandons it.
+    if (TofuAutonomousAlt::IsAltWithRealPlayer(bot))
+        return false;
+
     int32 freeSlotNum = 0;
 
     for (uint16 i = 0; i < MAX_QUEST_LOG_SIZE; ++i)

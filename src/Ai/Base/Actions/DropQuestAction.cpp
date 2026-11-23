@@ -9,6 +9,7 @@
 #include "Event.h"
 #include "PlayerbotTextMgr.h"
 #include "Playerbots.h"
+#include "TofuAutonomousAlt.h"
 
 bool DropQuestAction::Execute(Event event)
 {
@@ -71,6 +72,10 @@ bool CleanQuestLogAction::Execute(Event event)
         return false;
 
     if (!sPlayerbotAIConfig.DropObsoleteQuests)
+        return false;
+
+    // Tofu: an altbot in a real player's group keeps every quest until that player abandons it.
+    if (TofuAutonomousAlt::IsAltWithRealPlayer(bot))
         return false;
 
     // Only output this message if "debug rpg" strategy is enabled
