@@ -70,6 +70,10 @@ StatsWeightCalculator::StatsWeightCalculator(Player* player) : player_(player)
     cls = player->getClass();
     lvl = player->GetLevel();
     tab = AiFactory::GetPlayerSpecTab(player);
+    // Tofu: a paladin without talent points (below level 10) is read as Holy; it levels as Retribution, so weigh gear
+    // (two-handers, strength) that way.
+    if (cls == CLASS_PALADIN && lvl < 10)
+        tab = PALADIN_TAB_RETRIBUTION;
     collector_ = std::make_unique<StatsCollector>(type_, cls, lvl);
     // By talent spec, like the weights in GenerateBasicWeights(); type_ follows the strategies
     healSpec_ = PlayerbotAI::IsHeal(player, true);
@@ -762,6 +766,7 @@ void StatsWeightCalculator::CalculateItemTypePenalty(ItemTemplate const* proto)
                 (cls == CLASS_WARRIOR && tab == WARRIOR_TAB_ARMS) || (cls == CLASS_DRUID && tab == DRUID_TAB_FERAL) ||
                 (cls == CLASS_PALADIN && tab == PALADIN_TAB_RETRIBUTION) ||
                 (cls == CLASS_DEATH_KNIGHT && tab == DEATH_KNIGHT_TAB_BLOOD) ||
+                (cls == CLASS_DEATH_KNIGHT && tab == DEATH_KNIGHT_TAB_UNHOLY) ||  // Tofu: two-handed Unholy
                 (cls == CLASS_SHAMAN && tab == SHAMAN_TAB_ENHANCEMENT && !player_->CanDualWield()))
             {
                 weight_ *= 0.1;
