@@ -90,6 +90,11 @@ void SetEnabled(ObjectGuid::LowType guid, bool enabled);
 void ReplaceAll(std::vector<ObjectGuid::LowType> const& guids);
 bool IsEnabled(ObjectGuid::LowType guid);
 void SetSettings(Settings const& settings);
+
+// Items no bot ever sells, destroys, or deposits (item usage KEEP), such as the Pocket Portal; set by the module from
+// AutonomousAltBots.KeepItems.
+void SetKeptItems(std::vector<uint32> const& itemIds);
+bool IsKeptItem(uint32 itemId);
 Settings GetSettings();
 
 // True when this character is enrolled and is currently running as a playerbot (not driven by a game client).

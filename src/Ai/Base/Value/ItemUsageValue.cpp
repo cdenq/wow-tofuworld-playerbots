@@ -35,6 +35,10 @@ ItemUsage ItemUsageValue::Calculate()
     if (!proto)
         return ITEM_USAGE_NONE;
 
+    // Tofu: listed items (AutonomousAltBots.KeepItems, such as the Pocket Portal) are never sold, destroyed, or banked.
+    if (TofuAutonomousAlt::IsKeptItem(itemId))
+        return ITEM_USAGE_KEEP;
+
     if (IsRealPlayer(botAI->GetMaster()))
     {
         if (IsItemUsefulForSkill(proto) || IsItemNeededForSkill(proto))

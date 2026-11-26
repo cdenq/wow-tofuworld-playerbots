@@ -348,6 +348,20 @@ void SetSettings(Settings const& settings)
     g_Settings = settings;
 }
 
+std::unordered_set<uint32> g_KeptItems;
+
+void SetKeptItems(std::vector<uint32> const& itemIds)
+{
+    std::unique_lock lock(g_RegistryMutex);
+    g_KeptItems = std::unordered_set<uint32>(itemIds.begin(), itemIds.end());
+}
+
+bool IsKeptItem(uint32 itemId)
+{
+    std::shared_lock lock(g_RegistryMutex);
+    return g_KeptItems.contains(itemId);
+}
+
 Settings GetSettings()
 {
     std::shared_lock lock(g_RegistryMutex);
