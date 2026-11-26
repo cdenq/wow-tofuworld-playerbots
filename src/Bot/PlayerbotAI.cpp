@@ -1226,6 +1226,33 @@ void PlayerbotAI::HandleBotOutgoingPacket(WorldPacket const& packet)
 
     switch (packet.GetOpcode())
     {
+        case SMSG_TRADE_STATUS:
+        {
+            // Tofu: a trade opened by its master or a real player in its group is answered at once, not after the
+            // check delay of its last action (movement up to MaxWaitForMove, loot, hearthstone, ...); out of combat a
+            // cast in progress (crafting, mounting, hearthstone) is interrupted so the trade window opens.
+            WorldPacket p(packet);
+            p.rpos(0);
+            uint32 status = 0;
+            p >> status;
+            if (status == TRADE_STATUS_BEGIN_TRADE && p.size() >= sizeof(uint32) + sizeof(uint64))
+            {
+                ObjectGuid traderGuid;
+                p >> traderGuid;
+                Player* trader = ObjectAccessor::FindPlayer(traderGuid);
+                bool const partner =
+                    trader && (trader == GetMaster() ||
+                               (!GET_PLAYERBOT_AI(trader) && bot->GetGroup() && trader->GetGroup() == bot->GetGroup()));
+                if (partner)
+                {
+                    SetNextCheckDelay(0);
+                    if (!bot->IsInCombat() && bot->IsNonMeleeSpellCast(false, true, true))
+                        bot->InterruptNonMeleeSpells(false);
+                }
+            }
+            botOutgoingPacketHandlers.AddPacket(packet);
+            return;
+        }
         case SMSG_SPELL_FAILURE:
         {
             WorldPacket p(packet);
