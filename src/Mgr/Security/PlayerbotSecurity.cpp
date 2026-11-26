@@ -39,14 +39,8 @@ PlayerbotSecurityLevel PlayerbotSecurity::LevelFor(Player* from, DenyReason* rea
         return PLAYERBOT_SECURITY_DENY_ALL;
     }
 
-    if (botAI->IsOpposing(from))
-    {
-        if (reason)
-            *reason = PLAYERBOT_DENY_OPPOSING;
-
-        return PLAYERBOT_SECURITY_DENY_ALL;
-    }
-
+    // Tofu: only random bots refuse players of the other faction. A player's altbots (own account, guild, or linked
+    // account; the checks below decide) obey their owner across factions (the realm allows cross-faction groups).
     if (sPlayerbotAIConfig.IsInRandomAccountList(account))
     {
         // (duplicate check in case of faction change)
